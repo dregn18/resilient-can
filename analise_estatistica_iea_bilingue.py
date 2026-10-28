@@ -1,3 +1,195 @@
+import io, os, re, datetime
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from scipy.stats import spearmanr, mannwhitneyu
+
+st.set_page_config(page_title='Resilient Enterprise | Análise Estatística', page_icon='📊', layout='wide', initial_sidebar_state='expanded')
+st.markdown('''<style>
+.block-container{padding-top:1.7rem;max-width:1450px}.hero{padding:25px 30px;border-radius:16px;background:linear-gradient(115deg,#142b49,#275b84);color:white;margin-bottom:18px}.hero h1{color:white;font-size:2.1rem;margin:0}.hero p{color:#d9e8f6;margin:7px 0 0}.small{color:#64748b;font-size:.9rem}.stMetric{background:#f3f7fb;border:1px solid #e3eaf2;padding:13px;border-radius:12px}div[data-testid="stSidebar"]{background:#f3f6fb}
+</style>''', unsafe_allow_html=True)
+COLOR=['#2879b8','#e49b42','#22a69a','#7b65ba','#d86c83']
+
+@st.cache_data
+def load_excel(data):
+    return pd.read_excel(data)
+
+LANGUAGE_OPTIONS={'Português':'pt','English':'en'}
+with st.sidebar:
+    language_choice=st.selectbox('🌐 Idioma / Language',list(LANGUAGE_OPTIONS),key='language_choice')
+LANG=LANGUAGE_OPTIONS[language_choice]
+TRANSLATIONS={
+ 'Análises inferenciais · IEA 2027':'Inferential analyses · IEA 2027',
+ 'Carregar matriz Excel':'Upload Excel dataset',
+ 'Navegação':'Navigation',
+ 'Visão geral':'Overview',
+ '1 · Dor e sono':'1 · Pain and sleep',
+ '2 · Experiência profissional':'2 · Professional experience',
+ '3 · Capacidade física':'3 · Physical capacity',
+ '4 · Composição corporal':'4 · Body composition',
+ '5 · Estilo de vida':'5 · Lifestyle',
+ 'Qualidade dos dados':'Data quality',
+ 'Spearman e Mann–Whitney U · testes exploratórios · α = 0,05':'Spearman and Mann–Whitney U · exploratory tests · α = 0.05',
+ 'Participantes elegíveis':'Eligible participants',
+ 'A amostra identificada não tem N=15; verifica os dados.':'The identified sample is not N=15; check the data.',
+ 'Filtrar IDs (exploratório)':'Filter IDs (exploratory)',
+ 'Filtro ativo: a amostra deixou de ter N=15.':'Active filter: the sample is no longer N=15.',
+ 'Carrega o ficheiro dados_mestre_completo.xlsx na barra lateral ou coloca-o na mesma pasta do programa.':'Upload dados_mestre_completo.xlsx in the sidebar or place it next to the script.',
+ 'Não foi possível abrir o Excel:':'Could not open the Excel file:',
+ 'Comparação':'Comparison','Estado':'Status','Dados/variabilidade insuficientes':'Insufficient data/variability',
+ 'Interpretação exploratória: N pequeno, múltiplas comparações e testes não paramétricos. p ≥ 0,05 não demonstra ausência de associação; correlação não implica causalidade. Valores de p sem ajuste por multiplicidade.':'Exploratory interpretation: small N, multiple comparisons and nonparametric tests. p ≥ 0.05 does not prove the absence of association; correlation does not imply causation. P-values are unadjusted for multiple testing.',
+ 'Dashboard de análise estatística · Protocolo completo · Congresso IEA 2027':'Statistical analysis dashboard · Complete protocol · IEA 2027 Congress',
+ 'Panorama da amostra':'Sample overview','Registos na matriz':'Dataset records','Protocolo completo':'Complete protocol',
+ 'Variáveis disponíveis':'Available variables','Regiões de dor':'Pain regions','Intensidade da dor por região':'Pain intensity by region',
+ 'Intensidade média (END 0–10)':'Mean pain intensity (NRS 0–10)','Sono efetivo':'Actual sleep duration',
+ 'Horas de sono':'Hours of sleep','Trabalhadores':'Workers',
+ 'O ficheiro mestre contém os questionários originais. O score global PSQI não está disponível como coluna calculada; os testes com esse score não são substituídos pela qualidade subjetiva.':'The master dataset contains the original questionnaires. The global PSQI score is not available as a calculated column; tests requiring this score are not replaced with subjective sleep quality.',
+ 'Dor mecânica e fragmentação do sono':'Mechanical pain and sleep fragmentation',
+ 'Correlação de Spearman entre END nos ombros/região lombar e latência, despertares e duração efetiva do sono.':'Spearman correlations between shoulder/lower-back pain (NRS) and sleep latency, nighttime awakenings and actual sleep duration.',
+ 'Dor nos ombros × latência':'Shoulder pain × sleep latency','Dor lombar × despertares':'Lower-back pain × awakenings',
+ 'Experiência profissional e sintomas músculo-esqueléticos':'Professional experience and musculoskeletal symptoms',
+ 'Anos em altura × dor nos ombros':'Years working at height × shoulder pain',
+ 'Anos em altura × dor lombar':'Years working at height × lower-back pain',
+ 'Capacidade física · Sintomáticos vs. assintomáticos':'Physical capacity · Symptomatic vs. asymptomatic',
+ 'Definição operacional: sintomático = END > 0; assintomático = END = 0. Comparar com a classificação prevista no protocolo.':'Operational definition: symptomatic = NRS > 0; asymptomatic = NRS = 0. Check against the protocol classification.',
+ 'Sintomáticos':'Symptomatic','Assintomáticos':'Asymptomatic','Força dorsal':'Back strength',
+ 'Região':'Region','Indicador':'Measure','n sint.':'n sympt.','n assint.':'n asympt.',
+ 'Mediana [IIQ] sint.':'Median [IQR] sympt.','Mediana [IIQ] assint.':'Median [IQR] asympt.',
+ 'O pedido inclui comparação de scores globais PSQI. O Excel tem os itens individuais, mas não o score global validado; esse teste permanece pendente. Não se substitui pelo item de qualidade subjetiva.':'The request includes comparisons of global PSQI scores. The Excel contains individual items but no validated global score; this test remains pending. Subjective sleep quality is not a substitute.',
+ 'Composição corporal e dor lombar':'Body composition and lower-back pain',
+ 'IMC × dor lombar':'BMI × lower-back pain','Gordura corporal × dor lombar':'Body fat × lower-back pain',
+ 'Consumo de bebidas açucaradas e dor':'Sugar-sweetened beverage consumption and pain',
+ 'Frequência MEDAS codificada ordinalmente: menos de 1 = 0; 1 = 1; mais de 1 = 2. Não são quantidades exatas.':'MEDAS frequency coded ordinally: less than 1 = 0; 1 = 1; more than 1 = 2. These are not exact quantities.',
+ 'Bebidas açucaradas × carga total de dor':'Sugary drinks × total pain burden',
+ 'Bebidas açucaradas × regiões afetadas':'Sugary drinks × affected regions',
+ 'Carga global de dor = soma das END das nove regiões; indicador exploratório derivado, não score validado do Questionário Nórdico.':'Global pain burden = sum of NRS values across nine regions; an exploratory derived measure, not a validated Nordic Questionnaire score.',
+ 'Auditoria dos dados e correspondência das colunas':'Data audit and column mapping',
+ 'IDs sem os campos-chave necessários:':'IDs missing required key fields:',
+ 'Variável':'Variable','Coluna detetada':'Detected column','Valores válidos (amostra)':'Valid values (sample)',
+ 'NÃO ENCONTRADA':'NOT FOUND',
+ 'O PSQI global não consta do Excel. A avaliação completa desse score requer recodificação rigorosa dos itens e verificação das regras do instrumento, antes da comparação Mann–Whitney.':'The global PSQI score is not included in the Excel. Computing it requires rigorous item recoding and verification of the instrument scoring rules before Mann–Whitney comparisons.',
+ 'Exportar auditoria (.csv)':'Export audit (.csv)',
+ 'Ombros':'Shoulders','Lombar':'Lower back','Punhos/mãos':'Wrists/hands',
+ 'Experiência em altura':'Experience working at height','Latência do sono':'Sleep latency',
+ 'Despertares noturnos':'Nighttime awakenings','Duração do sono':'Sleep duration',
+ 'Dinamometria dorsal':'Back dynamometry','Preensão direita':'Right grip strength',
+ 'Preensão esquerda':'Left grip strength','IMC':'BMI','Gordura corporal':'Body fat',
+ 'Bebidas açucaradas':'Sugar-sweetened beverages',
+ 'Qualidade subjetiva do sono':'Subjective sleep quality','Carga global de dor':'Global pain burden',
+ 'Regiões com dor':'Pain-affected regions',
+ 'NÃO ENCONTRADA':'NOT FOUND'
+}
+def T(value):
+    if LANG!='en':return value
+    if isinstance(value,str):
+        return TRANSLATIONS.get(value,value)
+    return value
+PAGE_KEYS=['Visão geral','1 · Dor e sono','2 · Experiência profissional','3 · Capacidade física','4 · Composição corporal','5 · Estilo de vida','Qualidade dos dados']
+with st.sidebar:
+    st.title('📊 Resilient Enterprise')
+    st.caption(T('Análises inferenciais · IEA 2027'))
+    upload=st.file_uploader(T('Carregar matriz Excel'),type=['xlsx'])
+    st.divider()
+    selected_page=st.radio(T('Navegação'),PAGE_KEYS,format_func=T,label_visibility='collapsed')
+    page=selected_page
+    st.divider()
+    st.caption(T('Spearman e Mann–Whitney U · testes exploratórios · α = 0,05'))
+
+path=os.path.join(os.path.dirname(os.path.abspath(__file__)),'dados_mestre_completo.xlsx')
+if upload is None and not os.path.isfile(path):
+    st.info(T('Carrega o ficheiro dados_mestre_completo.xlsx na barra lateral ou coloca-o na mesma pasta do programa.'))
+    st.stop()
+try:
+    df=load_excel(upload if upload is not None else path)
+except Exception as exc:
+    st.error(f"{T('Não foi possível abrir o Excel:')} {exc}")
+    st.stop()
+df.columns=[str(c).strip() for c in df.columns]
+
+def find(part):
+    return next((c for c in df.columns if part.casefold() in c.casefold()),None)
+def num(col):
+    if col is None:return pd.Series(np.nan,index=df.index,dtype=float)
+    return pd.to_numeric(df[col].astype(str).str.replace(',','.',regex=False).str.strip(),errors='coerce')
+def hours(col):
+    if col is None:return pd.Series(np.nan,index=df.index,dtype=float)
+    def convert(x):
+        if pd.isna(x):return np.nan
+        if isinstance(x,(datetime.time,datetime.datetime,pd.Timestamp)):return x.hour+x.minute/60
+        s=str(x).strip()
+        if ':' in s:
+            try:
+                h,m=s.split(':')[:2];return float(h)+float(m)/60
+            except: return np.nan
+        try:return float(s.replace(',','.'))
+        except:return np.nan
+    return df[col].apply(convert).astype(float)
+
+def ordinal(col):
+    if col is None:return pd.Series(np.nan,index=df.index,dtype=float)
+    def convert(x):
+        if pd.isna(x):return np.nan
+        s=str(x).lower().strip()
+        if 'não ocorreu' in s or 'nao ocorreu' in s or 'nunca' in s:return 0
+        if 'menos de 1' in s:return 1
+        if '1 ou 2' in s:return 2
+        if '3 ou mais' in s:return 3
+        return np.nan
+    return df[col].apply(convert).astype(float)
+
+def sugarcode(col):
+    if col is None:return pd.Series(np.nan,index=df.index,dtype=float)
+    def convert(x):
+        if pd.isna(x):return np.nan
+        s=str(x).lower().strip()
+        if 'menos de 1' in s:return 0
+        if 'mais de 1' in s:return 2
+        if s in ['1','1.0']:return 1
+        try:return float(s.replace(',','.'))
+        except:return np.nan
+    return df[col].apply(convert).astype(float)
+
+cols={
+ 'Ombros':find('OMBROS - ESCALA NUMÉRICA'), 'Lombar':find('REGIÃO LOMBAR - ESCALA NUMÉRICA'),
+ 'Punhos/mãos':find('PUNHOS/MÃOS - ESCALA NUMÉRICA'),
+ 'Experiência em altura':find('TEMPO DE EXPERIÊNCIA EM TRABALHOS EM ALTURA'),
+ 'Latência do sono':find('QUANTO TEMPO DEMOROU A ADORMECER'),
+ 'Despertares noturnos':find('ACORDAR A MEIO DA NOITE OU MUITO CEDO'),
+ 'Duração do sono':find('QUANTAS HORAS DE SONO EFETIVO'),
+ 'Dinamometria dorsal':find('MÉDIA Din Dor'),
+ 'Preensão direita':find('MÉDIA Din PP D'), 'Preensão esquerda':find('MÉDIA Din PP E'),
+ 'IMC':find('Índice de Massa Corporal'), 'Gordura corporal':find('Gordura Corporal (%)'),
+ 'Bebidas açucaradas':find('QUANTAS BEBIDAS AÇUCARADAS OU REFRIGERANTES'),
+ 'Qualidade subjetiva do sono':find('COMO CLASSIFICARIA A QUALIDADE GERAL'),
+}
+# Os registos 2, 4 e 7 não completaram as avaliações; usar critérios objetivos, não apenas o N esperado.
+needed=['Ombros','Lombar','IMC','Latência do sono','Bebidas açucaradas']
+mask=pd.Series(True,index=df.index)
+for v in needed:
+    if cols[v]:mask &= df[cols[v]].notna()
+full=df.copy()
+df=df.loc[mask].copy()
+with st.sidebar:
+    st.metric(T('Participantes elegíveis'),len(df))
+    if len(df)!=15:st.warning(T('A amostra identificada não tem N=15; verifica os dados.'))
+    if 'ID' in df:
+        ids=sorted(df.ID.dropna().tolist())
+        chosen=st.multiselect(T('Filtrar IDs (exploratório)'),ids,default=ids)
+        df=df[df.ID.isin(chosen)].copy()
+        if len(df)!=15:st.warning(T('Filtro ativo: a amostra deixou de ter N=15.'))
+
+v={k:(hours(c) if k=='Duração do sono' else ordinal(c) if k=='Despertares noturnos' else sugarcode(c) if k=='Bebidas açucaradas' else num(c)) for k,c in cols.items() if k!='Qualidade subjetiva do sono'}
+for k in v:v[k]=v[k].reindex(df.index)
+region_cols=[c for c in df.columns if c.endswith('ESCALA NUMÉRICA DE DOR (END)')]
+if region_cols:
+    pain=df[region_cols].apply(lambda s:pd.to_numeric(s,errors='coerce'))
+    v['Carga global de dor']=pain.sum(axis=1,min_count=1)
+    v['Regiões com dor']=(pain>0).sum(axis=1).where(pain.notna().any(axis=1))
+else:
+    v['Carga global de dor']=pd.Series(np.nan,index=df.index)
+    v['Regiões com dor']=pd.Series(np.nan,index=df.index)
 
 def fmt(x,n=2):return '—' if pd.isna(x) else f'{x:.{n}f}'.replace('.',',')
 def desc(s):
