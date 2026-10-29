@@ -30,6 +30,8 @@ TRANSLATIONS={
  '3 · Capacidade física':'3 · Physical capacity',
  '4 · Composição corporal':'4 · Body composition',
  '5 · Estilo de vida':'5 · Lifestyle',
+ '6 · Atividade física':'6 · Physical activity',
+ '7 · Sono e capacidade física':'7 · Sleep and physical capacity',
  'Qualidade dos dados':'Data quality',
  'Spearman e Mann–Whitney U · testes exploratórios · α = 0,05':'Spearman and Mann–Whitney U · exploratory tests · α = 0.05',
  'Participantes elegíveis':'Eligible participants',
@@ -79,14 +81,28 @@ TRANSLATIONS={
  'Bebidas açucaradas':'Sugar-sweetened beverages',
  'Qualidade subjetiva do sono':'Subjective sleep quality','Carga global de dor':'Global pain burden',
  'Regiões com dor':'Pain-affected regions',
- 'NÃO ENCONTRADA':'NOT FOUND'
+ 'NÃO ENCONTRADA':'NOT FOUND',
+ 'Atividade física e sintomatologia':'Physical activity and symptoms',
+ 'MET-min/semana (IPAQ)':'MET-min/week (IPAQ)',
+ 'Nível global de atividade física':'Overall physical activity level',
+ 'Sono e recuperação vs. capacidade física':'Sleep and recovery vs. physical capacity',
+ 'Duração do sono × dinamometria dorsal':'Sleep duration × back dynamometry',
+ 'Duração do sono × preensão direita':'Sleep duration × right grip strength',
+ 'Duração do sono × preensão esquerda':'Sleep duration × left grip strength',
+ 'Comparação exploratória de MET-min/semana entre participantes sintomáticos e assintomáticos.':'Exploratory comparison of MET-min/week between symptomatic and asymptomatic participants.',
+ 'Correlações exploratórias de Spearman entre duração efetiva do sono e indicadores de força.':'Exploratory Spearman correlations between actual sleep duration and strength measures.',
+ 'Mediana [IIQ]':'Median [IQR]',
+ 'Média ± DP':'Mean ± SD',
+ 'Dados IPAQ incompletos ou inválidos':'Incomplete or invalid IPAQ data',
+ 'Cálculo IPAQ: caminhada 3,3; atividade moderada 4,0; vigorosa 8,0 MET. Duração em minutos por dia × dias por semana. Não é uma classificação validada de nível IPAQ.':'IPAQ calculation: walking 3.3; moderate activity 4.0; vigorous activity 8.0 MET. Minutes per day × days per week. This is not a validated IPAQ activity-level classification.',
+ 'Apenas resultados exploratórios; valores de p não ajustados para comparações múltiplas.':'Exploratory results only; p-values not adjusted for multiple comparisons.'
 }
 def T(value):
     if LANG!='en':return value
     if isinstance(value,str):
         return TRANSLATIONS.get(value,value)
     return value
-PAGE_KEYS=['Visão geral','1 · Dor e sono','2 · Experiência profissional','3 · Capacidade física','4 · Composição corporal','5 · Estilo de vida','Qualidade dos dados']
+PAGE_KEYS=['Visão geral','1 · Dor e sono','2 · Experiência profissional','3 · Capacidade física','4 · Composição corporal','5 · Estilo de vida','6 · Atividade física','7 · Sono e capacidade física','Qualidade dos dados']
 with st.sidebar:
     st.title('📊 Resilient Enterprise')
     st.caption(T('Análises inferenciais · IEA 2027'))
@@ -190,6 +206,37 @@ if region_cols:
 else:
     v['Carga global de dor']=pd.Series(np.nan,index=df.index)
     v['Regiões com dor']=pd.Series(np.nan,index=df.index)
+
+# IPAQ short form: MET-min/week calculated from day frequency and minutes/day.
+# Use minutes fields rather than adding hours and minutes (the latter may be duplicated).
+def ipaq_field(prefix, suffix):
+    return next((c for c in full.columns if prefix.casefold() in c.casefold() and suffix.casefold() in c.casefold()), None)
+
+ipaq_fields = {
+    'vig_days': ipaq_field('NOS ÚLTIMOS 7 DIAS, EM QUANTOS DIAS FEZ ATIVIDADES FÍSICAS VIGOROSAS', 'Dias por Semana'),
+    'vig_min': ipaq_field('NOS DIAS EM QUE PRATICA ATIVIDADES FÍSICAS VIGOROSAS', 'Minutos por Dia'),
+    'mod_days': ipaq_field('NOS ÚLTIMOS 7 DIAS, EM QUANTOS DIAS FEZ ATIVIDADES FÍSICAS MODERADAS', 'Dias por Semana'),
+    'mod_min': ipaq_field('NOS DIAS EM QUE FAZ ATIVIDADES FÍSICAS MODERADAS', 'Minutos por Dia'),
+    'walk_days': ipaq_field('NOS ÚLTIMOS 7 DIAS, EM QUANTOS DIAS CAMINHOU 10 MINUTOS SEGUIDOS', 'Dias por Semana'),
+    'walk_min': ipaq_field('QUANTO TEMPO DESPENDEU NUM DESSES DIAS A ANDAR/CAMINHAR', 'Minutos por Dia'),
+}
+
+def calculate_ipaq():
+    if not all(ipaq_fields.values()):
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    a = {k: num(c).reindex(df.index) for k,c in ipaq_fields.items()}
+    for kind in ('vig', 'mod', 'walk'):
+        days, minutes = a[kind+'_days'], a[kind+'_min']
+        valid = days.between(0,7) & minutes.between(0,960)
+        a[kind+'_days'] = days.where(valid)
+        a[kind+'_min'] = minutes.where(valid)
+        # Zero days mean zero weekly minutes even when duration is blank.
+        a[kind+'_min'] = a[kind+'_min'].mask((days==0) & minutes.isna(),0)
+    return (8.0*a['vig_days']*a['vig_min'] +
+            4.0*a['mod_days']*a['mod_min'] +
+            3.3*a['walk_days']*a['walk_min'])
+
+v['MET-min/semana (IPAQ)'] = calculate_ipaq()
 
 def fmt(x,n=2):return '—' if pd.isna(x) else f'{x:.{n}f}'.replace('.',',')
 def desc(s):
@@ -300,6 +347,58 @@ if page=='5 · Estilo de vida':
     with b:scatter('Bebidas açucaradas','Regiões com dor','Bebidas açucaradas × regiões afetadas')
     st.caption(T('Carga global de dor = soma das END das nove regiões; indicador exploratório derivado, não score validado do Questionário Nórdico.'))
     note()
+if page=='6 · Atividade física':
+    st.header(T('Atividade física e sintomatologia'))
+    st.write(T('Comparação exploratória de MET-min/semana entre participantes sintomáticos e assintomáticos.'))
+    st.caption(T('Cálculo IPAQ: caminhada 3,3; atividade moderada 4,0; vigorosa 8,0 MET. Duração em minutos por dia × dias por semana. Não é uma classificação validada de nível IPAQ.'))
+    metric='MET-min/semana (IPAQ)'
+    valid=v[metric].dropna()
+    c1,c2,c3=st.columns(3)
+    c1.metric(T('Participantes elegíveis'),len(df))
+    c2.metric('IPAQ n',len(valid))
+    c3.metric(T('Mediana [IIQ]'),desc(valid))
+    if valid.empty:st.warning(T('Dados IPAQ incompletos ou inválidos'))
+    rows=[]
+    for reg in ['Ombros','Lombar']:
+        group=v[reg]
+        x=v[metric][group>0].dropna()
+        y=v[metric][group==0].dropna()
+        if len(x)>0 and len(y)>0:
+            U,pval=mannwhitneyu(x,y,alternative='two-sided',method='auto')
+        else:U,pval=np.nan,np.nan
+        rows.append({T('Região'):T(reg),T('n sint.'):len(x),T('n assint.'):len(y),
+                     T('Mediana [IIQ] sint.'):desc(x),T('Mediana [IIQ] assint.'):desc(y),
+                     'U':fmt(U,2),'p':fmt(pval,3)})
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    charts=st.columns(2)
+    for pane,reg in zip(charts,['Ombros','Lombar']):
+        with pane:
+            group=v[reg]
+            plot=pd.DataFrame({'MET':v[metric], 'Group':np.where(group>0,T('Sintomáticos'),T('Assintomáticos')),
+                               'Pain':group, 'ID':df['ID'] if 'ID' in df else df.index}).dropna()
+            fig=px.box(plot,x='Group',y='MET',color='Group',points='all',hover_data=['ID'],
+                       color_discrete_sequence=COLOR,labels={'Group':T('Comparação'),'MET':T(metric)})
+            fig.update_layout(title=T(reg),height=400,showlegend=False,plot_bgcolor='#f7f9fc',
+                              paper_bgcolor='rgba(0,0,0,0)',margin=dict(t=55,l=30,r=20,b=35))
+            st.plotly_chart(fig,use_container_width=True)
+    note()
+
+if page=='7 · Sono e capacidade física':
+    st.header(T('Sono e recuperação vs. capacidade física'))
+    st.write(T('Correlações exploratórias de Spearman entre duração efetiva do sono e indicadores de força.'))
+    targets=['Dinamometria dorsal','Preensão direita','Preensão esquerda']
+    result_table([corr('Duração do sono',metric,'Duração do sono',metric) for metric in targets])
+    for metric in targets:
+        pair=pd.concat([v['Duração do sono'],v[metric]],axis=1).dropna()
+        with st.expander(T(metric),expanded=True):
+            c1,c2,c3=st.columns(3)
+            c1.metric('N',len(pair))
+            c2.metric(T('Mediana [IIQ]')+' · '+T('Duração do sono'),desc(pair.iloc[:,0]))
+            c3.metric(T('Mediana [IIQ]')+' · '+T(metric),desc(pair.iloc[:,1]))
+            scatter('Duração do sono',metric,'Duração do sono × '+metric)
+    st.caption(T('Apenas resultados exploratórios; valores de p não ajustados para comparações múltiplas.'))
+    note()
+
 if page=='Qualidade dos dados':
     st.header(T('Auditoria dos dados e correspondência das colunas'))
     st.write((f'Dataset: **{len(full)} records × {len(full.columns)} columns**. Eligible after completeness screening: **{len(df)}**.' if LANG=='en' else f'Matriz: **{len(full)} registos × {len(full.columns)} colunas**. Elegíveis após filtro de completude: **{len(df)}**.'))
@@ -310,4 +409,7 @@ if page=='Qualidade dos dados':
         audit.append({T('Variável'):T(label),T('Coluna detetada'):c or T('NÃO ENCONTRADA'),T('Valores válidos (amostra)'):int(df[c].notna().sum()) if c else 0})
     st.dataframe(pd.DataFrame(audit),use_container_width=True,hide_index=True)
     st.warning(T('O PSQI global não consta do Excel. A avaliação completa desse score requer recodificação rigorosa dos itens e verificação das regras do instrumento, antes da comparação Mann–Whitney.'))
+    st.subheader('IPAQ')
+    st.dataframe(pd.DataFrame([{'Field':k,'Excel column':c or T('NÃO ENCONTRADA')} for k,c in ipaq_fields.items()]),use_container_width=True,hide_index=True)
+    st.write('MET-min/week valid:',int(v['MET-min/semana (IPAQ)'].notna().sum()))
     st.download_button(T('Exportar auditoria (.csv)'),pd.DataFrame(audit).to_csv(index=False).encode('utf-8-sig'),'auditoria_iea.csv','text/csv')
