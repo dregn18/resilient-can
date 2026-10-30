@@ -32,6 +32,7 @@ TRANSLATIONS={
  '5 · Estilo de vida':'5 · Lifestyle',
  '6 · Atividade física':'6 · Physical activity',
  '7 · Sono e capacidade física':'7 · Sleep and physical capacity',
+ '8 · Flexibilidade lombar':'8 · Sit and Reach',
  'Qualidade dos dados':'Data quality',
  'Spearman e Mann–Whitney U · testes exploratórios · α = 0,05':'Spearman and Mann–Whitney U · exploratory tests · α = 0.05',
  'Participantes elegíveis':'Eligible participants',
@@ -95,14 +96,22 @@ TRANSLATIONS={
  'Média ± DP':'Mean ± SD',
  'Dados IPAQ incompletos ou inválidos':'Incomplete or invalid IPAQ data',
  'Cálculo IPAQ: caminhada 3,3; atividade moderada 4,0; vigorosa 8,0 MET. Duração em minutos por dia × dias por semana. Não é uma classificação validada de nível IPAQ.':'IPAQ calculation: walking 3.3; moderate activity 4.0; vigorous activity 8.0 MET. Minutes per day × days per week. This is not a validated IPAQ activity-level classification.',
- 'Apenas resultados exploratórios; valores de p não ajustados para comparações múltiplas.':'Exploratory results only; p-values not adjusted for multiple comparisons.'
+ 'Apenas resultados exploratórios; valores de p não ajustados para comparações múltiplas.':'Exploratory results only; p-values not adjusted for multiple comparisons.',
+ 'Sit and Reach · Dor lombar':'Sit and Reach · Lower-back pain',
+ 'Comparação exploratória do melhor resultado Sit and Reach (cm) entre participantes com dor lombar (END > 0) e sem dor lombar (END = 0).':'Exploratory comparison of best Sit and Reach score (cm) between participants with lower-back pain (NRS > 0) and without lower-back pain (NRS = 0).',
+ 'Sit and Reach (cm)':'Sit and Reach (cm)',
+ 'Tamanho do efeito (correlação bisserial de postos)':'Effect size (rank-biserial correlation)',
+ 'Amostras esperadas: 9 sintomáticos e 6 assintomáticos. Confirma a correspondência com o protocolo.':'Expected groups: 9 symptomatic and 6 asymptomatic. Verify agreement with the protocol.',
+ 'Não foi encontrada a coluna Sit and Reach no Excel.':'Sit and Reach column was not found in the Excel.',
+ 'Dados insuficientes para calcular o teste.':'Insufficient data to calculate the test.',
+ 'r bisserial':'Rank-biserial r'
 }
 def T(value):
     if LANG!='en':return value
     if isinstance(value,str):
         return TRANSLATIONS.get(value,value)
     return value
-PAGE_KEYS=['Visão geral','1 · Dor e sono','2 · Experiência profissional','3 · Capacidade física','4 · Composição corporal','5 · Estilo de vida','6 · Atividade física','7 · Sono e capacidade física','Qualidade dos dados']
+PAGE_KEYS=['Visão geral','1 · Dor e sono','2 · Experiência profissional','3 · Capacidade física','4 · Composição corporal','5 · Estilo de vida','6 · Atividade física','7 · Sono e capacidade física','8 · Flexibilidade lombar','Qualidade dos dados']
 with st.sidebar:
     st.title('📊 Resilient Enterprise')
     st.caption(T('Análises inferenciais · IEA 2027'))
@@ -176,6 +185,7 @@ cols={
  'Duração do sono':find('QUANTAS HORAS DE SONO EFETIVO'),
  'Dinamometria dorsal':find('MÉDIA Din Dor'),
  'Preensão direita':find('MÉDIA Din PP D'), 'Preensão esquerda':find('MÉDIA Din PP E'),
+ 'Sit and Reach (cm)':find('MELHOR SaR'),
  'IMC':find('Índice de Massa Corporal'), 'Gordura corporal':find('Gordura Corporal (%)'),
  'Bebidas açucaradas':find('QUANTAS BEBIDAS AÇUCARADAS OU REFRIGERANTES'),
  'Qualidade subjetiva do sono':find('COMO CLASSIFICARIA A QUALIDADE GERAL'),
@@ -397,6 +407,50 @@ if page=='7 · Sono e capacidade física':
             c3.metric(T('Mediana [IIQ]')+' · '+T(metric),desc(pair.iloc[:,1]))
             scatter('Duração do sono',metric,'Duração do sono × '+metric)
     st.caption(T('Apenas resultados exploratórios; valores de p não ajustados para comparações múltiplas.'))
+    note()
+
+if page=='8 · Flexibilidade lombar':
+    st.header(T('Sit and Reach · Dor lombar'))
+    st.write(T('Comparação exploratória do melhor resultado Sit and Reach (cm) entre participantes com dor lombar (END > 0) e sem dor lombar (END = 0).'))
+    st.caption(T('Amostras esperadas: 9 sintomáticos e 6 assintomáticos. Confirma a correspondência com o protocolo.'))
+    sar=v['Sit and Reach (cm)']
+    back=v['Lombar']
+    symptomatic=sar[back>0].dropna()
+    asymptomatic=sar[back==0].dropna()
+    n1,n0=len(symptomatic),len(asymptomatic)
+    a,b,c=st.columns(3)
+    a.metric(T('Sintomáticos'),n1)
+    b.metric(T('Assintomáticos'),n0)
+    c.metric('N',n1+n0)
+    if cols['Sit and Reach (cm)'] is None:
+        st.warning(T('Não foi encontrada a coluna Sit and Reach no Excel.'))
+    elif n1==0 or n0==0:
+        st.warning(T('Dados insuficientes para calcular o teste.'))
+    else:
+        U,pval=mannwhitneyu(symptomatic,asymptomatic,alternative='two-sided',method='auto')
+        # U is defined for the first group (symptomatic); rank-biserial effect is signed accordingly.
+        rbc=2*U/(n1*n0)-1
+        result=pd.DataFrame([{
+            T('n sint.'):n1,T('Mediana [IIQ] sint.'):desc(symptomatic),
+            T('n assint.'):n0,T('Mediana [IIQ] assint.'):desc(asymptomatic),
+            'U':fmt(U,2),'p':fmt(pval,4),T('r bisserial'):fmt(rbc,3)
+        }])
+        st.dataframe(result,use_container_width=True,hide_index=True)
+        plot=pd.DataFrame({
+            'Score':pd.concat([symptomatic,asymptomatic]),
+            'Group':[T('Sintomáticos')]*n1+[T('Assintomáticos')]*n0
+        })
+        fig=px.box(plot,x='Group',y='Score',color='Group',points='all',
+                   color_discrete_sequence=COLOR,
+                   labels={'Group':T('Comparação'),'Score':T('Sit and Reach (cm)')})
+        fig.update_layout(height=430,showlegend=False,plot_bgcolor='#f7f9fc',
+                          paper_bgcolor='rgba(0,0,0,0)',margin=dict(t=35,l=30,r=20,b=35))
+        st.plotly_chart(fig,use_container_width=True)
+        st.caption(T('Tamanho do efeito (correlação bisserial de postos)')+' · '+
+                   ('positive values indicate higher scores in the symptomatic group.' if LANG=='en' else
+                    'valores positivos indicam resultados superiores no grupo sintomático.'))
+        if (n1,n0)!=(9,6):
+            st.warning(T('Amostras esperadas: 9 sintomáticos e 6 assintomáticos. Confirma a correspondência com o protocolo.'))
     note()
 
 if page=='Qualidade dos dados':
